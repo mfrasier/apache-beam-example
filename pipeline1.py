@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 import logging
@@ -5,6 +7,30 @@ import time
 
 logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
 logger = logging.getLogger("pipeline1")
+
+
+class SumAccumulatorFn(beam.CombineFn):
+    def create_accumulator(self, *args, **kwargs):
+        time = datetime.Now()
+        sum = 0
+        print(f"kwargs: {kwargs}")
+        accumulator = time, sum
+        return accumulator
+
+    def add_input(self, mutable_accumulator, element, *args, **kwargs):
+        print(f"element: {element}")
+        window, sum = mutable_accumulator
+        return window, sum + 1
+
+    def merge_accumulators(self, accumulators, *args, **kwargs):
+        print(f"accumulators: {accumulators}")
+        windows, counts = zip(*accumulators)
+        return windows, sum(counts)
+
+    def extract_output(self, accumulator, *args, **kwargs):
+        print(f"accumulator: {accumulator}")
+        window, sum = accumulator
+        return window, sum
 
 
 class AddTimestampDoFn(beam.DoFn):
@@ -32,7 +58,8 @@ def run(pipeline_options, file_pattern):
                 | 'read' >> beam.io.ReadFromParquet(file_pattern)
                 | 'timestamp' >> beam.ParDo(AddTimestampDoFn())
                 | 'window' >> beam.WindowInto(beam.window.FixedWindows(60 * 60))
-                # | 'count elements' >> beam.combiners.Count.PerKey()
+                # | 'combine' >> beam.CombinePerKey(SumAccumulatorFn())
+                | 'count elements' >> beam.combiners.Count.Globally().without_defaults()
                 | 'print' >> beam.Map(print))
 
 
