@@ -56,14 +56,33 @@ def run(pipeline_options, file_pattern):
         user_data = (
                 p
                 | 'read' >> beam.io.ReadFromParquet(file_pattern)
-                | 'timestamp' >> beam.ParDo(AddTimestampDoFn())
+                | 'set timestamp' >> beam.ParDo(AddTimestampDoFn())
+                | 'pair with one' >> beam.Map(lambda x: (x, 1))
                 | 'window' >> beam.WindowInto(beam.window.FixedWindows(60 * 60))
                 # | 'combine' >> beam.CombinePerKey(SumAccumulatorFn())
-                | 'count elements' >> beam.combiners.Count.Globally().without_defaults()
+                # | 'count elements' >> beam.combiners.Count.Globally().without_defaults()
                 | 'print' >> beam.Map(print))
+
+
+def country_counts(pipeline_options, file_pattern):
+    logger.info("counting users by country from " + file_pattern)
+    with beam.Pipeline(options=pipeline_options) as p:
+        def count_countries(country_ones):
+            (country, ones) = country_ones
+            return country, sum(ones)
+
+        count_by_country = (
+            p
+            | 'read' >> beam.io.ReadFromParquet(file_pattern)
+            | 'pair country with one' >> beam.Map(lambda x: (x['country'], 1))
+            | 'group' >> beam.GroupByKey()
+            | 'count' >> beam.Map(count_countries))
+
+        count_by_country | 'print' >> beam.Map(print)
 
 
 if __name__ == "__main__":
     parquet_files = "data/userdata*.parquet"
     pipeline_options = PipelineOptions(runner='direct')
-    run(pipeline_options, parquet_files)
+    # run(pipeline_options, parquet_files)
+    country_counts(pipeline_options, parquet_files)
