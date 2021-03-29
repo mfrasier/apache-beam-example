@@ -43,6 +43,19 @@ class AddTimestampDoFn(beam.DoFn):
         yield beam.window.TimestampedValue(element, event_time)
 
 
+class FormatCountryDoFn(beam.DoFn):
+    def process(self, element, window=beam.DoFn.WindowParam):
+        ts_format = '%Y-%m-%d %H:%M UTC'
+        window_start = window.start.to_utc_datetime().strftime(ts_format)
+        window_end = window.end.to_utc_datetime().strftime(ts_format)
+        return [{
+            'country': element[0],
+            'count': element[1],
+            'window_start': window_start,
+            'window_end': window_end
+        }]
+
+
 def extract_event_time(element):
     """ Extract event time from element. """
     time_tuple = element['registration_dttm'].to_pydatetime().timetuple()
@@ -64,7 +77,7 @@ def run(pipeline_options, file_pattern):
                 | 'print' >> beam.Map(print))
 
 
-def country_counts(pipeline_options, file_pattern):
+def country_counts_global(pipeline_options, file_pattern):
     logger.info("counting users by country from " + file_pattern)
     with beam.Pipeline(options=pipeline_options) as p:
         def count_countries(country_ones):
@@ -74,9 +87,32 @@ def country_counts(pipeline_options, file_pattern):
         count_by_country = (
             p
             | 'read' >> beam.io.ReadFromParquet(file_pattern)
+            # | 'set timestamp' >> beam.ParDo(AddTimestampDoFn())
+            # | 'window' >> beam.WindowInto(beam.window.FixedWindows(60 * 60, 0))
             | 'pair country with one' >> beam.Map(lambda x: (x['country'], 1))
             | 'group' >> beam.GroupByKey()
             | 'count' >> beam.Map(count_countries))
+            # | 'format' >> beam.ParDo(FormatCountryDoFn()))
+
+        count_by_country | 'print' >> beam.Map(print)
+
+
+def country_counts_windowed(pipeline_options, file_pattern):
+    logger.info("counting users by country from " + file_pattern)
+    with beam.Pipeline(options=pipeline_options) as p:
+        def count_countries(country_ones):
+            (country, ones) = country_ones
+            return country, sum(ones)
+
+        count_by_country = (
+            p
+            | 'read' >> beam.io.ReadFromParquet(file_pattern)
+            | 'set timestamp' >> beam.ParDo(AddTimestampDoFn())
+            | 'window' >> beam.WindowInto(beam.window.FixedWindows(60 * 60, 0))
+            | 'pair country with one' >> beam.Map(lambda x: (x['country'], 1))
+            | 'group' >> beam.GroupByKey()
+            | 'count' >> beam.Map(count_countries)
+            | 'format' >> beam.ParDo(FormatCountryDoFn()))
 
         count_by_country | 'print' >> beam.Map(print)
 
@@ -85,4 +121,5 @@ if __name__ == "__main__":
     parquet_files = "data/userdata*.parquet"
     pipeline_options = PipelineOptions(runner='direct')
     # run(pipeline_options, parquet_files)
-    country_counts(pipeline_options, parquet_files)
+    # country_counts_global(pipeline_options, parquet_files)
+    country_counts_windowed(pipeline_options, parquet_files)
