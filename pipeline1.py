@@ -4,6 +4,7 @@ import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 import logging
 import time
+from apache_beam.transforms.trigger import AccumulationMode, AfterProcessingTime
 
 logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
 logger = logging.getLogger("pipeline1")
@@ -108,13 +109,15 @@ def country_counts_windowed(pipeline_options, file_pattern):
             p
             | 'read' >> beam.io.ReadFromParquet(file_pattern)
             | 'set timestamp' >> beam.ParDo(AddTimestampDoFn())
-            | 'window' >> beam.WindowInto(beam.window.FixedWindows(60 * 60, 0))
+            | 'window' >> beam.WindowInto(beam.window.FixedWindows(60 * 30, 0))
             | 'pair country with one' >> beam.Map(lambda x: (x['country'], 1))
             | 'group' >> beam.GroupByKey()
             | 'count' >> beam.Map(count_countries)
             | 'format' >> beam.ParDo(FormatCountryDoFn()))
 
-        count_by_country | 'print' >> beam.Map(print)
+        # count_by_country | 'print' >> beam.Map(print)
+        count_by_country | beam.io.WriteToText(file_path_prefix="country_counts_windowed", file_name_suffix=".txt", num_shards=1)
+        logger.info(f"writing results to country_counts_windowed*.txt")
 
 
 if __name__ == "__main__":
@@ -122,4 +125,6 @@ if __name__ == "__main__":
     pipeline_options = PipelineOptions(runner='direct')
     # run(pipeline_options, parquet_files)
     # country_counts_global(pipeline_options, parquet_files)
+
+    pipeline_options = PipelineOptions(runner='direct', job_endpoint='localhost:8099', environment_type='LOOPBACK')
     country_counts_windowed(pipeline_options, parquet_files)
